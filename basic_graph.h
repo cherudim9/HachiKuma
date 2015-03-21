@@ -3,6 +3,7 @@
 
 #include "utility.h"
 #include <string>
+#include <cassert>
 #include <ctime>
 #include <map>
 #include <vector>
@@ -58,6 +59,9 @@ static GraphType GetDualGraphType(GraphType type){
 
 class BasicGraph{
 
+  //in the effect of shard memory, it's
+  //PROHIBITED to use STL container
+
  public:
 
   explicit BasicGraph(bool verbose = 0);
@@ -77,8 +81,6 @@ class BasicGraph{
   void Clear();
   void Load(const std::string& base_path); 
   void Save(const std::string& base_path, const int parameter = kALL) const;
-  void LoadMapping(const std::string &base_string);
-  void SaveMapping(const std::string& base_string, const int parameter) const;
   void GenerateRMATGraph(int n_scale=10, double edge_factor=0.9, double a=0.60, double b=0.20, double c=0.15);
 
   //mapping
@@ -98,13 +100,13 @@ class BasicGraph{
   
   struct BasicGraphImpl{
 
-  BasicGraphImpl(): generated(0){}
+  BasicGraphImpl(): generated(0), number_edges(0), boundaries(0), targets(0){}
     ~BasicGraphImpl(){}
     
     bool generated;
     int number_edges;
-    std::vector<int> boundaries;
-    std::vector<int> targets;
+    int *boundaries;
+    int *targets;
 
     void Clear();
   };
@@ -115,16 +117,11 @@ class BasicGraph{
   void Reverse();
   void Intersect();
   void Union();
-  void CalcMapping();
 
   int number_vertex_;
   int number_edges_;
 
-  std::vector<BasicGraphImpl> graphs_;
-
-  bool has_mapping_;
-  std::vector<int> to_raw_mapping_;
-  std::map<int,int> from_raw_mapping_;
+  BasicGraphImpl graphs_[BAD];
   
   bool verbose_;
 

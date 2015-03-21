@@ -4,55 +4,66 @@
 const int kBinaryLoadingRate=65536;
 
 template<class T>
-static void LoadBinaryFile(const std::string& path, std::ifstream& stream, int size, std::vector<T> &container, bool verbose){
+static void ArraySet(T * &a, int n=0){
+  if (a)
+    delete a;
+  if (n){
+    a=new T[n];
+    memset(a, 0, n * sizeof(T) );
+  }
+  else
+    a=0;
+}
+
+template<class T>
+static void LoadBinaryFile(const std::string& path, std::ifstream& stream, int size, int * &array, bool verbose){
   mProcess load_process("Load of binary file " + path, size, verbose);
   load_process.Start();
-  container.resize(size);
+  ArraySet(array, size);
   for(int i=0; i<size; i+=kBinaryLoadingRate){
-    stream.read( reinterpret_cast<char*>( container.data() + i ) , sizeof(T) * kBinaryLoadingRate );
+    stream.read( reinterpret_cast<char*>( array + i ) , sizeof(T) * kBinaryLoadingRate );
     load_process.Update(i);
   }
   load_process.Stop();
 }
 
 template<class T>
-static void SaveBinaryFile(const std::string& path, std::ofstream& stream, int size, const std::vector<T> &container, bool verbose){
+static void SaveBinaryFile(const std::string& path, std::ofstream& stream, int size, const int * array, bool verbose){
   mProcess save_process("Save of binary file " + path, size, verbose);
   save_process.Start();
   for(int i=0; i<size; i+=kBinaryLoadingRate){
     int t = std::min( kBinaryLoadingRate, size - i );
-    stream.write( reinterpret_cast<const 
-char*> ( container.data() + i ) , sizeof(T) * t );
+    stream.write( reinterpret_cast<const char*> ( array + i ) , sizeof(T) * t );
     save_process.Update(i);
   }
   save_process.Stop();
 }
 
 template<class T>
-static void LoadTextFile(const std::string& path, std::ifstream& stream, int size, std::vector<T>& container, bool verbose){
+static void LoadTextFile(const std::string& path, std::ifstream& stream, int size, int * &array, bool verbose){
   mProcess load_process("Load of text file " + path, size, verbose);
   load_process.Start();
-  container.resize(size);
+  ArraySet(array, size);
   for(int i=0; i<size; i++){
-    stream >> container[i];
+    stream >> array[i];
     load_process.Update(i);
   }
   load_process.Stop();
 }
 
 template<class T>
-static void SaveTextFile(const std::string& path, std::ofstream& stream, int size, const std::vector<T>& container, bool verbose){
+static void SaveTextFile(const std::string& path, std::ofstream& stream, int size, const int * array, bool verbose){
   mProcess save_process("Save of text file " + path, size, verbose);
   save_process.Start();
   for(int i=0; i<size; i++){
-    stream << container[i] << "\n" ;
+    stream << array[i] << "\n" ;
     save_process.Update(i);
   }
   save_process.Stop();
 }
 
 BasicGraph::BasicGraph(bool verbose):
-  number_vertex_(0), number_edges_(0), graphs_(std::vector<BasicGraphImpl>(static_cast<int>(BAD))), has_mapping_(0), verbose_(verbose){
+  number_vertex_(0), number_edges_(0), verbose_(verbose){
   
 }
 
@@ -68,10 +79,8 @@ BasicGraph::~BasicGraph(){
 void BasicGraph::Clear(){
   number_edges_=0;
   number_vertex_=0;
-  has_mapping_=0;
-  to_raw_mapping_.clear();
-  from_raw_mapping_.clear();
-  graphs_ = std::vector<BasicGraphImpl>( static_cast<int>( BAD ) );
+  for(int i=0; i<BAD; i++)
+    graphs_[i].Clear();
 }
 
 void BasicGraph::Load(const std::string& base_path){
@@ -111,19 +120,13 @@ void BasicGraph::Load(const std::string& base_path){
     try{
       LoadImpl(base_path, INTERSECTION, kBinary);
     } catch(std::runtime_error &e){
-      Generate(INTERSECTION);
+       Generate(INTERSECTION);
     }
     try{
       LoadImpl(base_path, UNION, kBinary);
     } catch(std::runtime_error &e){
       Generate(UNION);
     }
-
-  }
-
-  try{
-    LoadMapping(base_path);
-  } catch(std::runtime_error &e){
 
   }
 }
@@ -148,48 +151,6 @@ void BasicGraph::Save(const std::string& base_path, const int parameter)const{
   if (parameter & kUnion){
     SaveImpl(base_path, UNION, parameter);
   }
-  if (parameter & kMapping){
-    if (!has_mapping_)
-      throw std::runtime_error("No mapping");
-    SaveMapping(base_path, parameter);
-  }
-}
-
-void BasicGraph::CalcMapping(){
-  mProcess process("Generation of reverse mapping", number_vertex_, verbose_);
-  process.Start();
-  from_raw_mapping_.clear();
-  for(int i=0; i<number_vertex_; i++){
-    from_raw_mapping_[ to_raw_mapping_[i] ] = i;
-    process.Update(i);
-  }
-  process.Stop();
-}
-
-void BasicGraph::LoadMapping(const std::string& base_path){
-  std::string mapping_file(base_path+".map");
-  std::string text_name(mapping_file), bin_name(mapping_file + ".bin");
-  bool text_exist=FilePath::Exist(text_name), bin_exist=FilePath::Exist(bin_name);
-  if (text_exist && bin_exist){
-    throw std::runtime_error("Both text and binary version of mapping exist.");
-  }
-  if (text_exist){
-    has_mapping_=1;
-    std::ifstream text_stream(text_name);
-    FilePath::CheckForOpen(text_name, text_stream);
-    LoadTextFile<int>(text_name, text_stream, number_vertex_, to_raw_mapping_, verbose_);
-    CalcMapping();
-    return;
-  }
-  if (bin_exist){
-    has_mapping_=1;
-    std::ifstream bin_stream(bin_name);
-    FilePath::CheckForOpen(bin_name, bin_stream);
-    LoadBinaryFile<int>(bin_name, bin_stream, number_vertex_, to_raw_mapping_, verbose_);
-    CalcMapping();
-    return;
-  }
-  throw std::runtime_error("No file for mapping.");
 }
 
 void BasicGraph::GenerateRMATGraph(int n_scale, double edge_factor, double a, double b, double c){
@@ -224,9 +185,8 @@ void BasicGraph::GenerateRMATGraph(int n_scale, double edge_factor, double a, do
   BasicGraphImpl& g=graphs_[ static_cast<int> ( OUT ) ];
   g.generated=1;
   g.number_edges = m;
-  g.boundaries.clear();
-  g.boundaries.resize(n);
-  g.targets.resize(m);
+  ArraySet(g.boundaries, n);
+  ArraySet(g.targets, m);
   for(int i=0; i<n; i++){
     sort( adj_edge[i].begin(), adj_edge[i].end() );
     adj_edge[i].resize( unique(adj_edge[i].begin(), adj_edge[i].end()) - adj_edge[i].begin());
@@ -240,25 +200,6 @@ void BasicGraph::GenerateRMATGraph(int n_scale, double edge_factor, double a, do
   Generate(UNION);
 }
 
-void BasicGraph::SaveMapping(const std::string& base_path, const int parameter)const{
-  if (!has_mapping_){
-    throw std::runtime_error("No mapping");
-  }
-
-  std::string mapping_file(base_path+".map");
-  if (parameter & kBinary)
-    mapping_file += ".bin";
-  FilePath::CheckForExistence(mapping_file);
-  std::ofstream mapping_stream(mapping_file);
-  FilePath::CheckForCreation(mapping_file, mapping_stream);
-
-  if (parameter & kBinary){
-    SaveBinaryFile<int>(mapping_file, mapping_stream, number_vertex_, to_raw_mapping_, verbose_);
-  }else{
-    SaveTextFile<int>(mapping_file, mapping_stream, number_vertex_, to_raw_mapping_, verbose_);
-  }
-}
-
 void BasicGraph::Dump(GraphType type, int range)const{
   std::cout << "n = " << number_vertex_ << ", e = " << number_edges_ << std::endl;
   for(int i = 0; i < number_vertex_; i++){
@@ -266,8 +207,6 @@ void BasicGraph::Dump(GraphType type, int range)const{
       break;
     int d=GetDegree(i, type);
     std::cout << "v" << i;
-    if (has_mapping_)
-      std::cout << "(raw:" << ToRawId(i) << ")" << std::endl;
     std::cout << "d" << d << " [";
     auto nei=GetNeighbors(i, type);
     for(int j = 0; j != d; j++){
@@ -305,36 +244,7 @@ std::pair<const int*, const int*>  BasicGraph::GetNeighborsIterators(int vertex_
   const BasicGraphImpl &g = graphs_[static_cast<int>(type)];
   std::vector<int> ret;
   int start= vertex_id ? g.boundaries[vertex_id-1] : 0;
-  return std::make_pair( g.targets.data() + start, g.targets.data() + g.boundaries[vertex_id] );
-}
-
-int BasicGraph::FromRawId(int raw_id)const{
-  if (!has_mapping_)
-    return -1;
-  auto tar=from_raw_mapping_.find(raw_id);
-  if (tar == from_raw_mapping_.end())
-    return -1;
-  return tar->second;
-}
-
-int BasicGraph::ToRawId(int id)const{
-  if (id<0 || id>=number_vertex_)
-    return -1;
-  return to_raw_mapping_[id];
-}
-
-std::vector<int> BasicGraph::FromRawIds(const std::vector<int> &raw_ids)const{
-  std::vector<int> ret;
-  for(const auto& i: raw_ids)
-    ret.push_back(FromRawId(i));
-  return ret;
-}
-
-std::vector<int> BasicGraph::ToRawIds(const std::vector<int>& ids)const{
-  std::vector<int> ret;
-  for(const auto& i: ids)
-    ret.push_back(ToRawId(i));
-  return ret;
+  return std::make_pair( g.targets + start, g.targets + g.boundaries[vertex_id] );
 }
 
 void BasicGraph::LoadImpl(const std::string& base_path, const GraphType type, const int parameter){
@@ -351,7 +261,7 @@ void BasicGraph::LoadImpl(const std::string& base_path, const GraphType type, co
   std::ifstream index_stream(index_name);
   std::ifstream bound_stream(bound_name);
   std::ifstream target_stream(target_name);
-  std::vector<int> index_vector;
+  int* index_array=0;
 
   FilePath::CheckForOpen(index_name, index_stream);
   FilePath::CheckForOpen(bound_name, bound_stream);
@@ -359,16 +269,16 @@ void BasicGraph::LoadImpl(const std::string& base_path, const GraphType type, co
 
   if (parameter & kBinary){
     //the implementation was stored in binary files
-    LoadBinaryFile<int>(index_name, index_stream, 2, index_vector, verbose_);
-    g.number_edges=index_vector[1];
+    LoadBinaryFile<int>(index_name, index_stream, 2, index_array, verbose_);
+    g.number_edges=index_array[1];
     g.generated=1;
     LoadBinaryFile<int>(bound_name, bound_stream, number_vertex_, g.boundaries, verbose_);
     LoadBinaryFile<int>(target_name, target_stream, g.number_edges, g.targets, verbose_);
   }else{
     //the implementation was stored in text files
-    LoadTextFile<int>(index_name, index_stream, 2, index_vector, verbose_);
+    LoadTextFile<int>(index_name, index_stream, 2, index_array, verbose_);
     g.generated=1;
-    g.number_edges=index_vector[1];
+    g.number_edges=index_array[1];
     LoadTextFile<int>(bound_name, bound_stream, number_vertex_, g.boundaries, verbose_);
     LoadTextFile<int>(target_name, target_stream, g.number_edges, g.targets, verbose_);    
   }    
@@ -395,15 +305,16 @@ void BasicGraph::SaveImpl(const std::string& base_path, const GraphType type, co
   std::ofstream target_stream(target_name);
   FilePath::CheckForCreation(target_name, target_stream);
 
-  std::vector<int> index_vector(2);
-  index_vector[0]=number_vertex_; index_vector[1]=g.number_edges;
+  int *index_array;
+  index_array=new int [2];
+  index_array[0]=number_vertex_; index_array[1]=g.number_edges;
 
   if (parameter & kBinary){
-    SaveBinaryFile<int>(index_name, index_stream, 2, index_vector, verbose_);
+    SaveBinaryFile<int>(index_name, index_stream, 2, index_array, verbose_);
     SaveBinaryFile<int>(bound_name, bound_stream, number_vertex_, g.boundaries, verbose_);
     SaveBinaryFile<int>(target_name, target_stream, g.number_edges, g.targets, verbose_);
   }else{
-    SaveTextFile<int>(index_name, index_stream, 2, index_vector, verbose_);
+    SaveTextFile<int>(index_name, index_stream, 2, index_array, verbose_);
     SaveTextFile<int>(bound_name, bound_stream, number_vertex_, g.boundaries, verbose_);    
     SaveTextFile<int>(target_name, target_stream, g.number_edges, g.targets, verbose_);    
   }
@@ -433,8 +344,8 @@ void BasicGraph::Generate(GraphType type){
 void BasicGraph::BasicGraphImpl::Clear(){
   generated=0;
   number_edges=0;
-  boundaries.clear();
-  targets.clear();
+  ArraySet(boundaries);
+  ArraySet(targets);
 }
 
 void BasicGraph::Reverse(){
@@ -447,18 +358,18 @@ void BasicGraph::Reverse(){
   derived.Clear();
   derived.generated=1;
   derived.number_edges=origin.number_edges;
-  derived.boundaries.resize(number_vertex_);
-  derived.targets.resize(origin.number_edges);
+  ArraySet(derived.boundaries, number_vertex_);
+  ArraySet(derived.targets, origin.number_edges);
 
-  for(auto i: origin.targets){
-    derived.boundaries[i]++;
+  for(int j=0; j<origin.number_edges; j++){
+    derived.boundaries[ origin.targets[j] ]++;
   }
   for(int i=1; i<number_vertex_; i++)
     derived.boundaries[i]+=derived.boundaries[i-1];
 
   int j=0;
-  static std::vector<int> now;
-  now=derived.boundaries;
+  std::vector<int> now(derived.boundaries, derived.boundaries + number_vertex_);
+  //  assert( (*now.rbegin()) == derived.number_edges);
   for(int i=0; i<number_vertex_; i++){
     for(; j<origin.boundaries[i]; j++){
       int y=origin.targets[j];
@@ -480,7 +391,7 @@ void BasicGraph::Intersect(){
     return;
   derived.Clear();
   derived.generated=1;
-  derived.boundaries.resize(number_vertex_);
+  ArraySet(derived.boundaries, number_vertex_);
 
   static std::vector<int> visited, now;
   visited.resize(number_vertex_);
@@ -514,8 +425,8 @@ void BasicGraph::Intersect(){
     if (o == 0){
       for(int i=1; i<number_vertex_; i++)
         derived.boundaries[i]+=derived.boundaries[i-1];
-      now=derived.boundaries;
-      derived.targets.resize(derived.number_edges);
+      now=std::vector<int>(derived.boundaries, derived.boundaries + number_vertex_);
+      ArraySet(derived.targets, derived.number_edges);
     }
   }
 
@@ -532,7 +443,7 @@ void BasicGraph::Union(){
     return;
   derived.Clear();
   derived.generated=1;
-  derived.boundaries.resize(number_vertex_);
+  ArraySet(derived.boundaries, number_vertex_);
   
   static std::vector<int> visited, now;
   visited.resize(number_vertex_);
@@ -570,8 +481,8 @@ void BasicGraph::Union(){
     if (o == 0){
       for(int i=1; i<number_vertex_; i++)
         derived.boundaries[i]+=derived.boundaries[i-1];
-      now=derived.boundaries;
-      derived.targets.resize(derived.number_edges);
+      now=std::vector<int>(derived.boundaries, derived.boundaries + number_vertex_);
+      ArraySet(derived.targets, derived.number_edges);
     }
   }
   

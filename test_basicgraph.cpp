@@ -15,7 +15,7 @@ string ItoA(int x){
   return s;
 }
 
-int maxN=1000;
+int maxN=100;
 vector<vector<int> > edge, edge_in, edge_inter, edge_union;
 double edge_factor=0.3;
 
@@ -123,6 +123,9 @@ void Test(int t){
   //
 
   test_process.Stop();
+
+  system( string("rm -f "+name+".*").c_str() );
+  system("rm -f result.*");
 }
 
 int main(){
